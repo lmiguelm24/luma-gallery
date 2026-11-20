@@ -3,39 +3,14 @@ import Icon from './Icon.jsx';
 import { filterMedia, fingerprint, formatBytes, groupMedia, mediaKind } from './lib.js';
 import { loadMedia, saveMedia } from './db.js';
 import { Gallery, isAndroid, mediaUrl } from './native.js';
+import Viewer from './Viewer.jsx';
+import { dismissTopOverlay, IconButton, useFocusTrap } from './ui.jsx';
 
 const sections = [
   ['all', 'grid', 'Toda la galería'], ['photos', 'image', 'Fotos'],
   ['videos', 'video', 'Videos'], ['favorites', 'heart', 'Favoritos'],
   ['albums', 'folder', 'Álbumes'], ['trash', 'trash', 'Papelera local'],
 ];
-
-function IconButton({ icon, label, active, ...props }) {
-  return <button className={`icon-button ${active ? 'is-active' : ''}`} title={label} aria-label={label} {...props}><Icon name={icon} /></button>;
-}
-
-function useFocusTrap(ref, onClose) {
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    const previous = document.activeElement;
-    ref.current?.focus();
-    function onKey(event) {
-      if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); }
-      if (event.key !== 'Tab') return;
-      const focusable = [...ref.current.querySelectorAll('button:not(:disabled), input, select, a[href], video[controls], [tabindex="0"]')];
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first) { event.preventDefault(); return; }
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === ref.current)) { event.preventDefault(); first.focus(); }
-    }
-    document.addEventListener('keydown', onKey);
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = overflow; previous?.focus(); };
-  }, [ref]);
-}
 
 function Modal({ title, children, onClose }) {
   const ref = useRef(null);
@@ -74,82 +49,6 @@ function Thumbnail({ item }) {
       : item.native ? (thumbnail ? <img src={thumbnail} alt="" loading="lazy" onError={() => setFailed(true)}/> : <div className="thumbnail-loading"/>)
       : item.kind === 'video' ? <video src={item.url} preload="metadata" muted playsInline onError={() => setFailed(true)}/>
       : <img src={item.url} alt="" loading="lazy" onError={() => setFailed(true)}/>}
-  </div>;
-}
-
-function Viewer({ items, id, onClose, onFavorite, notify, busy }) {
-  const [currentId, setCurrentId] = useState(id);
-  const index = items.findIndex(item => item.id === currentId);
-  const item = items[index];
-  const [details, setDetails] = useState(false);
-  const [rotation, setRotation] = useState(0);
-  const [zoom, setZoom] = useState(false);
-  const [slideshow, setSlideshow] = useState(false);
-  const [mediaError, setMediaError] = useState(false);
-  const ref = useRef(null);
-  const touch = useRef(null);
-  useFocusTrap(ref, onClose);
-  const next = direction => {
-    if (items.length) setCurrentId(items[(Math.max(index, 0) + direction + items.length) % items.length].id);
-  };
-  useEffect(() => { setRotation(0); setZoom(false); setMediaError(false); }, [currentId]);
-  useEffect(() => {
-    const handler = event => {
-      if (['INPUT', 'SELECT', 'VIDEO'].includes(event.target.tagName)) return;
-      if (event.key === 'ArrowRight') next(1);
-      if (event.key === 'ArrowLeft') next(-1);
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  });
-  useEffect(() => {
-    if (!slideshow || items.length < 2) return;
-    const timer = setInterval(() => next(1), 5000);
-    return () => clearInterval(timer);
-  });
-  useEffect(() => { if (!item) onClose(); }, [item, onClose]);
-  if (!item) return null;
-  async function share() {
-    try {
-      if (item.native) { await Gallery.share({ uri: item.uri, mime: item.type }); return; }
-      const file = new File([item.blob], item.name, { type: item.type });
-      if (!navigator.canShare?.({ files: [file] })) { notify('Tu navegador no permite compartir archivos. Usa Descargar.'); return; }
-      await navigator.share({ files: [file], title: item.name });
-    } catch (error) { if (error.name !== 'AbortError') notify('No se pudo compartir el archivo.'); }
-  }
-  async function fullscreen() {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else if (ref.current.requestFullscreen) await ref.current.requestFullscreen();
-      else notify('Pantalla completa no disponible en este dispositivo.');
-    } catch { notify('No se pudo activar la pantalla completa.'); }
-  }
-  return <div className="viewer" ref={ref} role="dialog" aria-modal="true" aria-label={`Visor: ${item.name}`} tabIndex={-1}>
-    <header className="viewer-header"><IconButton icon="close" label="Cerrar visor" onClick={onClose}/><div className="viewer-filename"><strong>{item.name}</strong><span>{index + 1} de {items.length}</span></div><div className="viewer-actions">
-      <IconButton icon="heart" active={item.favorite} label={item.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'} onClick={() => onFavorite(item)} disabled={busy}/>
-      <IconButton icon="share" label="Compartir archivo" onClick={share}/>
-      {!item.native && <a className="icon-button" href={item.url} download={item.name} aria-label="Descargar" title="Descargar"><Icon name="download"/></a>}
-      <IconButton icon="info" label="Información" active={details} onClick={() => setDetails(!details)}/>
-    </div></header>
-    <div className="viewer-body">
-      <div className={`viewer-stage ${zoom ? 'zoomed' : ''}`} onTouchStart={event => { touch.current = { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY }; }} onTouchEnd={event => {
-        if (!touch.current || zoom || event.target.tagName === 'VIDEO') return;
-        const dx = event.changedTouches[0].clientX - touch.current.x;
-        const dy = event.changedTouches[0].clientY - touch.current.y;
-        if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) next(dx < 0 ? 1 : -1);
-        touch.current = null;
-      }}>
-        {mediaError ? <div className="viewer-error"><Icon name="info" size={36}/><h2>No se puede mostrar este archivo</h2><p>El formato puede no ser compatible o el permiso puede haber cambiado.</p><button className="button secondary" onClick={share}>Abrir con otra app</button></div>
-          : item.kind === 'video' ? <video key={item.id} src={item.url} controls playsInline preload="metadata" onError={() => setMediaError(true)}/>
-          : <img key={item.id} src={item.url} alt={item.name} style={{ transform: `rotate(${rotation}deg)` }} onDoubleClick={() => setZoom(!zoom)} onError={() => setMediaError(true)}/>}
-      </div>
-      {items.length > 1 && <><button className="viewer-arrow prev" aria-label="Anterior" onClick={() => next(-1)}><Icon name="chevron" size={26}/></button><button className="viewer-arrow next" aria-label="Siguiente" onClick={() => next(1)}><Icon name="chevron" size={26}/></button></>}
-      {details && <aside className="details-panel"><h3>Detalles del archivo</h3><dl><dt>Nombre</dt><dd>{item.name}</dd><dt>Fecha</dt><dd>{new Date(item.date).toLocaleString('es')}</dd><dt>Tipo</dt><dd>{item.type || 'Desconocido'}</dd><dt>Tamaño</dt><dd>{formatBytes(item.size)}</dd><dt>Álbum</dt><dd>{item.album}</dd>{item.width > 0 && <><dt>Resolución</dt><dd>{item.width} × {item.height} px</dd></>}{item.duration > 0 && <><dt>Duración</dt><dd>{Math.floor(item.duration / 60000)}:{String(Math.floor(item.duration / 1000) % 60).padStart(2, '0')}</dd></>}<dt>Ubicación</dt><dd>{item.native ? 'Galería de Android' : 'Importado en este navegador'}</dd></dl></aside>}
-    </div>
-    <footer className="viewer-footer"><span>{new Date(item.date).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })}</span><div>
-      {item.kind === 'image' && <><IconButton icon="zoom" label={zoom ? 'Reducir' : 'Ampliar'} active={zoom} onClick={() => setZoom(!zoom)}/><IconButton icon="rotate" label="Girar vista 90 grados" onClick={() => setRotation(rotation + 90)}/></>}
-      <IconButton icon="play" label={slideshow ? 'Detener presentación' : 'Presentación cada 5 segundos'} active={slideshow} onClick={() => setSlideshow(!slideshow)}/><IconButton icon="expand" label="Pantalla completa" onClick={fullscreen}/>
-    </div></footer>
   </div>;
 }
 
@@ -247,8 +146,7 @@ export default function App() {
   useEffect(() => {
     if (!isAndroid) return;
     function back() {
-      if (viewer) setViewer(null);
-      else if (modal) setModal(null);
+      if (viewer || modal) dismissTopOverlay();
       else if (sidebar) setSidebar(false);
       else if (selecting) clearSelection();
       else if (album) setAlbum('');
@@ -271,6 +169,33 @@ export default function App() {
     finally { mutationLock.current = false; setBusy(false); }
   }
   async function favorite(item) { await mutate([{ ...item, favorite: !item.favorite }]); }
+  async function saveEdited({ blob, name, width, height }) {
+    if (mutationLock.current) return false;
+    mutationLock.current = true; setBusy(true);
+    try {
+      if (isAndroid) {
+        if (blob.size > 18_000_000) throw new Error('La copia supera 18 MB. Elige JPEG o un recorte más pequeño para guardarla.');
+        const data = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = () => reject(new Error('No se pudo preparar la copia.'));
+          reader.readAsDataURL(blob);
+        });
+        const saved = await Gallery.saveImage({ data, name, mime: blob.type });
+        setItems(current => [...current.filter(item => item.id !== saved.id), { ...saved, native: true, url: mediaUrl(saved.uri), favorite: false, deletedAt: null }]);
+        notify('Copia guardada en Imágenes/Luma.');
+      } else {
+        const file = new File([blob], name, { type: blob.type, lastModified: Date.now() });
+        const record = { id: crypto.randomUUID(), fingerprint: fingerprint(file), name, blob: file, kind: 'image', type: file.type, size: file.size, date: file.lastModified, width, height, album: 'Ediciones Luma', favorite: false, deletedAt: null };
+        await saveMedia([record]);
+        const url = URL.createObjectURL(file); urls.current.add(url);
+        setItems(current => [...current, { ...record, url }]);
+        notify('Copia guardada en Ediciones Luma. Puedes descargarla desde el visor.');
+      }
+      return true;
+    } catch (exception) { notify(exception.message || 'No se pudo guardar la copia. Comprueba el espacio disponible.'); return false; }
+    finally { mutationLock.current = false; setBusy(false); }
+  }
   async function importFiles(fileList) {
     if (!fileList?.length || mutationLock.current) return;
     mutationLock.current = true; setBusy(true);
@@ -333,7 +258,7 @@ export default function App() {
       <span className="sidebar-label">TU ESPACIO PERSONAL</span>
       <nav aria-label="Navegación principal">{sections.map(([key, icon, label], index) => <React.Fragment key={key}>{index === 3 && <div className="nav-divider"/>}<button className={`nav-item ${section === key ? 'active' : ''}`} onClick={() => navigate(key)} aria-current={section === key ? 'page' : undefined}><Icon name={icon}/><span>{label}</span><span className="nav-count">{stats[key]}</span></button></React.Fragment>)}</nav>
       <div className="sidebar-bottom"><div className="local-card"><span className="local-icon"><Icon name="shield" size={21}/></span><strong>Solo tuyo. Siempre.</strong><p>Tus recuerdos se quedan en tu dispositivo, sin subirlos a la nube.</p><div className="local-total"><span>{isAndroid ? 'Archivos accesibles' : 'Biblioteca local'}</span><strong>{formatBytes(totalBytes)}</strong></div></div>
-      <button className="theme-button" onClick={() => setLight(!light)}><Icon name={light ? 'moon' : 'sun'} size={18}/><span>{light ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}</span></button><div className="sidebar-foot">LUMA GALLERY <span>v1.0</span></div></div>
+      <button className="theme-button" onClick={() => setLight(!light)}><Icon name={light ? 'moon' : 'sun'} size={18}/><span>{light ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}</span></button><div className="sidebar-foot">LUMA GALLERY <span>v1.2</span></div></div>
     </aside>
 
     <div className="workspace"><header className="topbar"><div className="topbar-left"><span className="mobile-menu"><IconButton icon="menu" label="Abrir menú" onClick={() => setSidebar(true)}/></span><span className="breadcrumb">Mi biblioteca</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="topbar-right"><span className="local-badge"><span/>{isAndroid ? 'En tu Android' : 'Almacenamiento local'}</span><button className="avatar" onClick={() => setModal('about')} aria-label="Acerca de Luma">L</button></div></header>
@@ -364,7 +289,7 @@ export default function App() {
       </main>
     </div>
     {selecting && <div className="selection-bar" role="region" aria-label="Acciones de selección"><strong>{selected.size} seleccionados</strong><button className="text-button" onClick={() => setSelected(new Set(visible.map(item => item.id)))}>Todos</button><div className="selection-actions">{section === 'trash' ? <><button className="button secondary" disabled={!selected.size || busy} onClick={() => batch('restore')}><Icon name="restore" size={17}/>Restaurar</button><button className="button danger" disabled={!selected.size || busy} onClick={() => setModal('delete')}>Quitar de Luma</button></> : <><IconButton icon="heart" label="Marcar favoritos" disabled={!selected.size || busy} onClick={() => batch('favorite')}/><IconButton icon="folder" label="Organizar en álbum" disabled={!selected.size || busy} onClick={() => batch('album')}/><IconButton icon="trash" label="Mover a papelera local" disabled={!selected.size || busy} onClick={() => batch('trash')}/></>}<IconButton icon="close" label="Cancelar selección" onClick={clearSelection}/></div></div>}
-    {viewer && <Viewer items={visible} id={viewer} onClose={() => setViewer(null)} onFavorite={favorite} notify={notify} busy={busy}/>}
+    {viewer && <Viewer items={visible} id={viewer} onClose={() => setViewer(null)} onFavorite={favorite} onSaveEdited={saveEdited} notify={notify} busy={busy}/>}
     {modal === 'album' && <Modal title="Organizar en álbum" onClose={() => setModal(null)}><p>Elige un álbum existente o crea uno. Esta organización solo cambia dentro de Luma.</p><form onSubmit={saveAlbum}><label className="form-label" htmlFor="album-name">Nombre del álbum</label><input id="album-name" className="form-input" list="album-suggestions" value={albumName} onChange={event => setAlbumName(event.target.value)} maxLength={80} required placeholder="Por ejemplo, Escapadas"/><datalist id="album-suggestions">{albums.map(name => <option value={name} key={name}/>)}</datalist><div className="modal-buttons"><button type="button" className="button secondary" onClick={() => setModal(null)}>Cancelar</button><button className="button primary" disabled={busy || !albumName.trim()}>Guardar álbum</button></div></form></Modal>}
     {modal === 'delete' && <Modal title="¿Quitar de la biblioteca local?" onClose={() => setModal(null)}><p>Se quitarán {selected.size} archivos y sus favoritos de Luma.{isAndroid ? ' Los originales de Android seguirán en el dispositivo y volverán a aparecer al actualizar la galería.' : ' Las copias importadas se eliminarán del navegador; los originales de tu dispositivo seguirán intactos.'}</p><div className="modal-buttons"><button className="button secondary" onClick={() => setModal(null)}>Cancelar</button><button className="button danger" disabled={busy} onClick={async () => { if (await mutate([], [...selected])) { clearSelection(); setModal(null); notify('Archivos quitados de Luma.'); } }}>Quitar de Luma</button></div></Modal>}
     {modal === 'about' && <Modal title="Tu espacio, con Luma" onClose={() => setModal(null)}><p>Luma organiza tus fotos y videos de forma local. No usa cuentas, servidores de archivos ni analíticas.</p><div className="about-feature"><Icon name="shield"/><p>{isAndroid ? 'Android controla el acceso a tu galería. Puedes cambiar los permisos en Ajustes → Aplicaciones → Luma → Permisos.' : 'Esta es la versión para navegador. Para consultar toda la galería con permisos, instala la versión Android.'}</p></div><p>Favoritos, álbumes y papelera son locales a Luma. No modifican los archivos originales. Los formatos compatibles dependen de tu dispositivo.</p><button className="button primary" onClick={() => setModal(null)}>Entendido</button></Modal>}

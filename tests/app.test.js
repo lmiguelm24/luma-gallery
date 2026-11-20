@@ -16,7 +16,7 @@ test('importación, duplicados, favoritos, visor, álbum y papelera persisten co
   setGlobal('indexedDB', indexedDB);
   setGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const { createRoot } = await import('react-dom/client');
-  const server = await createServer({ server: { middlewareMode: true }, configFile: false });
+  const server = await createServer({ server: { middlewareMode: true }, configFile: false, optimizeDeps: { noDiscovery: true, include: [] } });
   const root = createRoot(document.getElementById('root'));
   const getButton = text => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === text);
   async function waitFor(check) {
