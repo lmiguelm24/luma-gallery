@@ -4,14 +4,17 @@ import android.Manifest;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.database.Cursor;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
@@ -28,6 +31,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -223,6 +227,65 @@ public class GalleryPlugin extends Plugin {
                     call.resolve(result);
                 } finally { bitmap.recycle(); }
             } catch (Exception exception) { call.reject("Miniatura no disponible", exception); }
+        });
+    }
+
+    @PluginMethod
+    public void saveImage(PluginCall call) {
+        queries.execute(() -> {
+            Uri destination = null;
+            boolean finished = false;
+            ContentResolver resolver = getContext().getContentResolver();
+            try {
+                String data = call.getString("data", "");
+                String mime = call.getString("mime", "image/jpeg");
+                if (data.isEmpty() || data.length() > 24_000_000) throw new IllegalArgumentException("La copia es demasiado grande");
+                if (!"image/jpeg".equals(mime) && !"image/png".equals(mime)) throw new IllegalArgumentException("Formato no compatible");
+                byte[] bytes = Base64.decode(data, Base64.DEFAULT);
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || !mime.equals(bounds.outMimeType)) {
+                    throw new IllegalArgumentException("Los datos no corresponden a una imagen válida");
+                }
+                String extension = "image/png".equals(mime) ? ".png" : ".jpg";
+                String name = call.getString("name", "foto-luma-" + System.currentTimeMillis() + extension)
+                    .replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "-");
+                if (name.length() > 150) name = name.substring(0, 140) + extension;
+                if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(extension)) name += extension;
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Luma");
+                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                destination = resolver.insert(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values);
+                if (destination == null) throw new IllegalStateException("Android no pudo crear la copia");
+                try (OutputStream output = resolver.openOutputStream(destination, "w")) {
+                    if (output == null) throw new IllegalStateException("No se pudo abrir el archivo de destino");
+                    output.write(bytes);
+                }
+                values.clear();
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                if (resolver.update(destination, values, null, null) < 1) throw new IllegalStateException("No se pudo finalizar la copia");
+                finished = true;
+                JSObject item = new JSObject();
+                item.put("id", "android:image:" + ContentUris.parseId(destination));
+                item.put("uri", destination.toString());
+                item.put("name", name);
+                item.put("type", mime);
+                item.put("kind", "image");
+                item.put("size", bytes.length);
+                item.put("date", System.currentTimeMillis());
+                item.put("width", bounds.outWidth);
+                item.put("height", bounds.outHeight);
+                item.put("album", "Luma");
+                call.resolve(item);
+            } catch (Exception exception) { call.reject("No se pudo guardar la copia en Imágenes/Luma", exception); }
+            finally {
+                if (!finished && destination != null) {
+                    try { resolver.delete(destination, null, null); } catch (Exception ignored) { }
+                }
+            }
         });
     }
 

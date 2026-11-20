@@ -27,6 +27,17 @@ const paths = {
   restore: <><path d="M3 4v6h6M3 10a9 9 0 1 1 2 8M12 7v5l3 2"/></>,
   play: <path d="m9 5 11 7-11 7z"/>,
   spark: <><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></>,
+  edit: <><path d="m15 4 5 5L8 21H3v-5zM13 6l5 5"/></>,
+  crop: <><path d="M6 3v15h15M3 6h15v15M6 6l12 12"/></>,
+  filters: <><circle cx="9" cy="8" r="5"/><circle cx="15" cy="8" r="5"/><circle cx="12" cy="15" r="5"/></>,
+  sliders: <><path d="M4 7h7M15 7h5M4 17h3M11 17h9"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></>,
+  contrast: <><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></>,
+  flip: <><path d="M12 3v18M3 6v12l6-6zM21 6v12l-6-6z"/></>,
+  undo: <><path d="M3 10h11a6 6 0 0 1 0 12M3 10l6-6M3 10l6 6"/></>,
+  redo: <><path d="M21 10H10a6 6 0 0 0 0 12M21 10l-6-6M21 10l-6 6"/></>,
+  compare: <><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 2v20M7 9v6M17 7v10"/></>,
+  repeat: <><path d="m17 2 4 4-4 4M3 11V8a2 2 0 0 1 2-2h16M7 22l-4-4 4-4M21 13v3a2 2 0 0 1-2 2H3"/></>,
+  pause: <><path d="M7 5h3v14H7zM15 5h3v14h-3z" fill="currentColor"/></>,
 };
 
 export default function Icon({ name, size = 20, ...props }) {
