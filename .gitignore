@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.local
+.android-tools/
+*.apk
+*.jks
+*.keystore

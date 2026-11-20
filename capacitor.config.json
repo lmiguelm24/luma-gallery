@@ -1,0 +1,6 @@
+{
+  "appId": "app.luma.gallery",
+  "appName": "Luma",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#101116" }
+}
